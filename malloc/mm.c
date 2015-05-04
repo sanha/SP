@@ -18,17 +18,13 @@
 #include "mm.h"
 #include "memlib.h"
 
-/*********************************************************
- * NOTE TO STUDENTS: Before you do anything else, please
- * provide your information in the following struct.
- ********************************************************/
 team_t team = {
   /* Team name : Your student ID */
-  "2015-00000",
+  "2013-11415",
   /* Your full name */
-  "FirstName LastName",
+  "Sanha Lee",
   /* Your student ID */
-  "2015-00000",
+  "2013-11415",
   /* leave blank */
   "",
   /* leave blank */
@@ -75,6 +71,8 @@ static void remove_range(range_t **ranges, char *lo)
 int mm_init(range_t **ranges)
 {
   /* YOUR IMPLEMENTATION */
+  //printf ("Check the heap is in the initial state...?\n");
+  /* why don't we sbrk when heap encouter the lack of memory? */
 
 
   /* DON't MODIFY THIS STAGE AND LEAVE IT AS IT WAS */
