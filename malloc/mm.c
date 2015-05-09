@@ -92,7 +92,7 @@ static void remove_range(range_t **ranges, char *lo)
   	}
 }
 
-static char *heap_listp ;	// heap base pointer
+static char *heap_listp;	// heap base pointer
 
 /* function pre-definition */
 static void *extend_heap (size_t words);
@@ -106,7 +106,8 @@ static void *find_fit (size_t asize);
  */
 int mm_init(range_t **ranges)
 {
-	printf ("starting init\n");
+//	printf ("starting init\n");
+//	printf ("heap_listp is %x\n", heap_listp);
 
 	/* Create the initial empty heap */
   	if ((heap_listp = mem_sbrk (4*WSIZE)) == (void *) -1)
@@ -115,13 +116,12 @@ int mm_init(range_t **ranges)
 	PUT (heap_listp + (1*WSIZE), PACK (DSIZE, 1));	// Prologue header
 	PUT (heap_listp + (2*WSIZE), PACK (DSIZE, 1));	// Prologue footer
 	PUT (heap_listp + (3*WSIZE), PACK (0, 1));	// Epilogue header
-  	heap_listp += (2*WSIZE);
+	heap_listp += DSIZE;
+//	printf ("heap_listp is %x\n", heap_listp);
 
   	/* Extend the empty heap with a free block of CHUNKSIZE bytes */
   	if (extend_heap (CHUNKSIZE/WSIZE) == NULL)
 		return -1;
-
-	printf ("heap_listp is %x\n", &heap_listp);
 
   	/* DON't MODIFY THIS STAGE AND LEAVE IT AS IT WAS */
   	gl_ranges = ranges;
@@ -133,17 +133,27 @@ static void *extend_heap (size_t words){
 	char *bp;
 	size_t size;
 
-	printf("extend_heap, size is %d\n",size);
-
 	/* Allocate an even number of words to maintain alignment */
 	size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
+	
+	if (size < DSIZE) size = DSIZE;
 	if ((long)(bp = mem_sbrk(size)) == -1)
 		return NULL;
+
+//	printf("extend_heap, size is %d\n",size);
+//	printf("bp is %x\n", bp);
+	
+//	printf("GET_ALLOC bp is %d\n", GET_ALLOC (HDRP (bp)));
+//	printf("GET_SIZE bp is %d\n", GET_SIZE (HDRP (bp)));
 	
 	/* Initialize free block header/footer and the epilogue header */
 	PUT (HDRP (bp), PACK (size, 0));	// Free block header
 	PUT (FTRP (bp), PACK (size, 0));	// Free block footer
 	PUT (HDRP (NEXT_BLKP (bp)), PACK (0, 1));	// New epilogue header
+       
+//	printf("bp is %x\n", bp);
+//	printf("GET_ALLOC bp is %d\n", GET_ALLOC (HDRP (bp)));
+//	printf("GET_SIZE bp is %d\n", GET_SIZE (HDRP (bp)));
 
 	/* Coalesce if the previous block was free */
 	return coalesce (bp);
@@ -155,9 +165,9 @@ static void *extend_heap (size_t words){
  */
 void* mm_malloc(size_t size)
 {
-	printf("Starting malloc. \n");
-	printf("Heap start at %x\n", heap_listp);
-	printf("Heap size is %d\n", mem_heapsize());
+//	printf("Starting malloc. \n");
+//	printf("Heap start at %x\n", heap_listp);
+//	printf("Heap size is %d\n", mem_heapsize());
 
 	size_t asize;			// Adjusted block size
 	size_t extendsize;		// Amount to extend heap if no fit
@@ -170,7 +180,7 @@ void* mm_malloc(size_t size)
 	if (size <= DSIZE) asize = 2*DSIZE;
 	else asize = DSIZE * ((size + (DSIZE) + (DSIZE - 1)) / DSIZE);
 
-	printf ("asize is %d\n", asize);
+//	printf ("asize is %d\n", asize);
 
 	/* Search the free list for a fit */
 	if ((bp = find_fit (asize)) != NULL) {
@@ -189,14 +199,14 @@ static void *find_fit (size_t asize){
 	char *p = heap_listp;
 	char *end = mem_heap_hi();
 	
-	printf("end is %x\n", end);
+//	printf("end is %x\n", end);
 
 	while (1){
 		if (p < end){
-			printf ("p is %x\n", p);
-			printf ("GET_ALLOC p is %d\n", GET_ALLOC (p));
-			printf ("GET_SIZE p is %d\n", GET_SIZE (p));
-			if ((GET_ALLOC (p) || (GET_SIZE (p) < asize)))
+//			printf ("p is %x\n", p);
+//			printf ("GET_ALLOC p is %d\n", GET_ALLOC (HDRP (p)));
+//			printf ("GET_SIZE p is %d\n", GET_SIZE (HDRP (p)));
+			if ((GET_ALLOC (HDRP (p)) || (GET_SIZE (HDRP (p)) < asize)))
 				p = NEXT_BLKP (p);
 			else return p;
 		}
@@ -226,7 +236,7 @@ static void place (char *bp, size_t asize){
  */
 void mm_free(void *ptr)
 {
-	printf ("starting free\n");
+//	printf ("starting free\n");
 	size_t size = GET_SIZE (HDRP (ptr));
 	
 	PUT (HDRP (ptr), PACK (size, 0));
@@ -239,13 +249,15 @@ void mm_free(void *ptr)
 }
 
 static void *coalesce (void *bp){
-	printf ("coalesce\n");
+//	printf ("coalesce\n");
 
 	size_t prev_alloc = GET_ALLOC (FTRP (PREV_BLKP (bp)));
 	size_t next_alloc = GET_ALLOC (HDRP (NEXT_BLKP (bp)));
 	size_t size = GET_SIZE (HDRP (bp));
 
-	if (prev_alloc && next_alloc) return bp;	// case 1: prev & next block is allocated
+	if (prev_alloc && next_alloc) {
+		return bp;	// case 1: prev & next block is allocated
+	}
 
 	else if (prev_alloc) {				// case 2: prev block is allocated only
 		size += GET_SIZE (HDRP (NEXT_BLKP (bp)));
