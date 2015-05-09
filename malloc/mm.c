@@ -97,7 +97,7 @@ static char *heap_listp ;	// heap base pointer
 /* function pre-definition */
 static void *extend_heap (size_t words);
 static void *coalesce (void *bp);
-static void place (void *bp, size_t asize);
+static void place (char *bp, size_t asize);
 static void *find_fit (size_t asize);
 
 
@@ -106,6 +106,8 @@ static void *find_fit (size_t asize);
  */
 int mm_init(range_t **ranges)
 {
+	printf ("starting init\n");
+
 	/* Create the initial empty heap */
   	if ((heap_listp = mem_sbrk (4*WSIZE)) == (void *) -1)
 		return -1;
@@ -119,6 +121,8 @@ int mm_init(range_t **ranges)
   	if (extend_heap (CHUNKSIZE/WSIZE) == NULL)
 		return -1;
 
+	printf ("heap_listp is %x\n", &heap_listp);
+
   	/* DON't MODIFY THIS STAGE AND LEAVE IT AS IT WAS */
   	gl_ranges = ranges;
 
@@ -128,6 +132,8 @@ int mm_init(range_t **ranges)
 static void *extend_heap (size_t words){
 	char *bp;
 	size_t size;
+
+	printf("extend_heap, size is %d\n",size);
 
 	/* Allocate an even number of words to maintain alignment */
 	size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
@@ -149,6 +155,10 @@ static void *extend_heap (size_t words){
  */
 void* mm_malloc(size_t size)
 {
+	printf("Starting malloc. \n");
+	printf("Heap start at %x\n", heap_listp);
+	printf("Heap size is %d\n", mem_heapsize());
+
 	size_t asize;			// Adjusted block size
 	size_t extendsize;		// Amount to extend heap if no fit
 	char *bp;
@@ -159,6 +169,8 @@ void* mm_malloc(size_t size)
 	/* Adjust block size to include overhead and alignment reqs. */
 	if (size <= DSIZE) asize = 2*DSIZE;
 	else asize = DSIZE * ((size + (DSIZE) + (DSIZE - 1)) / DSIZE);
+
+	printf ("asize is %d\n", asize);
 
 	/* Search the free list for a fit */
 	if ((bp = find_fit (asize)) != NULL) {
@@ -175,17 +187,46 @@ void* mm_malloc(size_t size)
 
 static void *find_fit (size_t asize){
 	char *p = heap_listp;
-	char *end = mem_max_addr;
-	while ((p < mem_max_addr) && (GET_ALLOC (p) || (GET_SIZE (p) < asize)))
-		p = NEXT_BLKP (p);
+	char *end = mem_heap_hi();
+	
+	printf("end is %x\n", end);
+
+	while (1){
+		if (p < end){
+			printf ("p is %x\n", p);
+			printf ("GET_ALLOC p is %d\n", GET_ALLOC (p));
+			printf ("GET_SIZE p is %d\n", GET_SIZE (p));
+			if ((GET_ALLOC (p) || (GET_SIZE (p) < asize)))
+				p = NEXT_BLKP (p);
+			else return p;
+		}
+		else return NULL;
+	}
 }
 
+static void place (char *bp, size_t asize){
+	size_t bsize = GET_SIZE (HDRP (bp));
+	size_t nsize = bsize - asize;
+	
+	if (nsize >= 2*DSIZE){
+		PUT (HDRP (bp), PACK (asize, 1));
+		PUT (FTRP (bp), PACK (asize, 1));
+		bp = NEXT_BLKP (bp);
+		PUT (HDRP (bp), PACK (nsize, 0));
+		PUT (FTRP (bp), PACK (nsize, 0));
+	}
+	else {
+		PUT (HDRP (bp), PACK (bsize, 1));
+		PUT (FTRP (bp), PACK (bsize, 1));
+	}
+}
 
 /*
  * mm_free - Freeing a block does nothing.
  */
 void mm_free(void *ptr)
 {
+	printf ("starting free\n");
 	size_t size = GET_SIZE (HDRP (ptr));
 	
 	PUT (HDRP (ptr), PACK (size, 0));
@@ -198,6 +239,8 @@ void mm_free(void *ptr)
 }
 
 static void *coalesce (void *bp){
+	printf ("coalesce\n");
+
 	size_t prev_alloc = GET_ALLOC (FTRP (PREV_BLKP (bp)));
 	size_t next_alloc = GET_ALLOC (HDRP (NEXT_BLKP (bp)));
 	size_t size = GET_SIZE (HDRP (bp));
