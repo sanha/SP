@@ -293,7 +293,7 @@ static void *coalesce (void *bp){
  */
 void* mm_realloc(void *ptr, size_t t)
 {
-  return NULL;
+	return NULL;
 }
 
 /*
@@ -301,5 +301,15 @@ void* mm_realloc(void *ptr, size_t t)
  */
 void mm_exit(void)
 {
+	char *p = NEXT_BLKP (heap_listp);
+
+	while (GET_SIZE (HDRP (p)) != 0){
+//	   	printf ("p is %x\n", p);
+		if (GET_ALLOC (HDRP (p))){
+		    mm_free (p);
+//		    printf ("p was freed\n");
+		}
+		p = NEXT_BLKP (p);
+	}
 }
 
