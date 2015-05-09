@@ -237,7 +237,12 @@ static void place (char *bp, size_t asize){
 void mm_free(void *ptr)
 {
 //	printf ("starting free\n");
-	size_t size = GET_SIZE (HDRP (ptr));
+	if (!GET_ALLOC (HDRP (ptr))) { //doubly-freed
+	    printf ("You doubly freed memory.\n");
+	    exit(-1);
+	}
+    
+    	size_t size = GET_SIZE (HDRP (ptr));
 	
 	PUT (HDRP (ptr), PACK (size, 0));
 	PUT (FTRP (ptr), PACK (size, 0));
