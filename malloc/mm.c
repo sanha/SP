@@ -1,13 +1,19 @@
 /*
- * mm-naive.c - The fastest, least memory-efficient malloc package.
+ * mm.c with rbtree.
  *
- * In this naive approach, a block is allocated by simply incrementing
- * the brk pointer.  A block is pure payload. There are no headers or
- * footers.  Blocks are never coalesced or reused. Realloc is
- * implemented directly using mm_malloc and mm_free.
+ * I referred some basics and implicit method in the textbook, which is
+ * Bryand & O'Hallaron, Computer Systems - A programmer's Perspective.
  *
- * NOTE TO STUDENTS: Replace this header comment with your own header
- * comment that gives a high level description of your solution.
+ * And also referred the red-black tree implementation in the
+ * www.eternallyconfuzzled.com/tuts/datastructures/jsw_tut_rbtree.aspx
+ *
+ * For increasing throuputs, the red-black tree is used.
+ * The pointer pointing root of rb tree is saved at the begining of heap.
+ * The red-black flag is saved right before the allocation flag, and
+ * the pointers pointing children is saved right after the flags.
+ * When some block is freed, coalesce it and put it into the rb tree, and
+ * when alloc some block, find appropreate block in the rb tree.
+ * 
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,24 +57,35 @@ static range_t **gl_ranges;
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))
 
-/* Pack a size and allocated bit into word */
-#define PACK(size, alloc) ((size) | (alloc))
+/* Pack a size, rb bit and allocated bit into word */
+#define PACK(size, rb, alloc) ((size) | (rb << 1) | (alloc))
 
 /* Read and write a word at address p */
 #define GET(p)		(*(unsigned int *)(p))
 #define PUT(p, val)	(*(unsigned int *)(p) = (val))
 
-/* Read the size and allocated fields from address p */
+/* Read the size, rb and allocated fields from address p */
 #define GET_SIZE(p)	(GET (p) & ~0x7)
 #define GET_ALLOC(p)	(GET (p) & 0x1)
+
+/* Set RB flags */
+#define SET_RB(r, p)	((r)? (PUT (p, (GET (p) | 0x10))) : (PUT (p, (GET_SIZE (p) | GET_ALLOC(p)))))
+
+/* Read and write the children pointer */
+#define CHILD_GET(f, bp)	((f)? (*(char **)(bp + WSIZE)) : (*(char **)(bp)))
+#define CHILD_PUT(f, bp, p)	((f)? (*(char **)(bp + WSIZE) = p) : (*(char **)(bp) = p))
 
 /* Given block ptr bp, compute address of its header nad footer */
 #define HDRP(bp)	((char *)(bp) - WSIZE)
 #define FTRP(bp)	((char *)(bp) + GET_SIZE (HDRP (bp)) - DSIZE)
 
-/* GIven block ptr bp, compute address of next and previous blocks */
+/* Given block ptr bp, compute address of next and previous blocks */
 #define NEXT_BLKP(bp)	((char *)(bp) + GET_SIZE (((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp)	((char *)(bp) - GET_SIZE (((char *)(bp) - DSIZE)))
+
+/* Determine wether the node is red */
+#define IS_RED(bp)      ((bp != NULL) && (GET (HDRP (bp)) & 0x10))
+
 
 /* 
  * remove_range - manipulate range lists
@@ -93,12 +110,20 @@ static void remove_range(range_t **ranges, char *lo)
 }
 
 static char *heap_listp;	// heap base pointer
+static char *rb_root = NULL;	// pointing rb tree's root
+static char *rb_head = NULL;	// pointing head node
 
 /* function pre-definition */
 static void *extend_heap (size_t words);
 static void *coalesce (void *bp);
 static void place (char *bp, size_t asize);
 static void *find_fit (size_t asize);
+/* functions used for rb tree */
+static char *rot_single (char *root, int dir);
+static char *rot_double (char *root, int dir);
+static int rb_assert ();
+static int rb_insert (char *bp);
+static char *rb_remove (char *bp);
 
 
 /*
@@ -110,13 +135,18 @@ int mm_init(range_t **ranges)
 //	printf ("heap_listp is %x\n", heap_listp);
 
 	/* Create the initial empty heap */
-  	if ((heap_listp = mem_sbrk (4*WSIZE)) == (void *) -1)
+  	if ((heap_listp = mem_sbrk (4*DSIZE)) == (void *) -1)
 		return -1;
-  	PUT (heap_listp, 0);				// Alignment padding
-	PUT (heap_listp + (1*WSIZE), PACK (DSIZE, 1));	// Prologue header
-	PUT (heap_listp + (2*WSIZE), PACK (DSIZE, 1));	// Prologue footer
-	PUT (heap_listp + (3*WSIZE), PACK (0, 1));	// Epilogue header
-	heap_listp += DSIZE;
+  	PUT (heap_listp, 0);					// Alignment padding
+	PUT (heap_listp + WSIZE, 0);
+	PUT (heap_listp + (2*WSIZE), 0);			// Used to RB-tree head node
+	*(heap_listp + (3*WSIZE)) = NULL;
+	*(heap_listp + (4*WSIZE)) = NULL;
+	PUT (heap_listp + (5*WSIZE), PACK (DSIZE, 0, 1));	// Prologue header
+	PUT (heap_listp + (6*WSIZE), PACK (DSIZE, 0, 1));	// Prologue footer
+	PUT (heap_listp + (7*WSIZE), PACK (0, 0, 1));		// Epilogue header
+	rb_head = heap_listp + (3*WSIZE);
+	heap_listp += 6*WSIZE;
 //	printf ("heap_listp is %x\n", heap_listp);
 
   	/* Extend the empty heap with a free block of CHUNKSIZE bytes */
@@ -136,7 +166,7 @@ static void *extend_heap (size_t words){
 	/* Allocate an even number of words to maintain alignment */
 	size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
 	
-	if (size < DSIZE) size = DSIZE;
+	if (size < 2*DSIZE) size = 2*DSIZE;
 	if ((long)(bp = mem_sbrk(size)) == -1)
 		return NULL;
 
@@ -147,9 +177,10 @@ static void *extend_heap (size_t words){
 //	printf("GET_SIZE bp is %d\n", GET_SIZE (HDRP (bp)));
 	
 	/* Initialize free block header/footer and the epilogue header */
-	PUT (HDRP (bp), PACK (size, 0));	// Free block header
-	PUT (FTRP (bp), PACK (size, 0));	// Free block footer
-	PUT (HDRP (NEXT_BLKP (bp)), PACK (0, 1));	// New epilogue header
+	//TODO: change this to insert (rb_root, bp) => coal deal with this.
+	PUT (HDRP (bp), PACK (size, 1, 0));	// Free block header
+	PUT (FTRP (bp), PACK (size, 1, 0));	// Free block footer
+	PUT (HDRP (NEXT_BLKP (bp)), PACK (0, 0, 1));	// New epilogue header
        
 //	printf("bp is %x\n", bp);
 //	printf("GET_ALLOC bp is %d\n", GET_ALLOC (HDRP (bp)));
@@ -174,7 +205,7 @@ void* mm_malloc(size_t size)
 	char *bp;
 
 	/* Ignore spurious requests */
-	if (size == 0) return NULL;
+	if (size <= 0) return NULL;
 
 	/* Adjust block size to include overhead and alignment reqs. */
 	if (size <= DSIZE) asize = 2*DSIZE;
@@ -198,7 +229,7 @@ void* mm_malloc(size_t size)
 static void *find_fit (size_t asize){
 	char *p = heap_listp;
 	char *end = mem_heap_hi();
-	
+	//TODO : Change this to search & delete from tree.
 //	printf("end is %x\n", end);
 
 	while (1){
@@ -219,15 +250,16 @@ static void place (char *bp, size_t asize){
 	size_t nsize = bsize - asize;
 	
 	if (nsize >= 2*DSIZE){
-		PUT (HDRP (bp), PACK (asize, 1));
-		PUT (FTRP (bp), PACK (asize, 1));
-		bp = NEXT_BLKP (bp);
-		PUT (HDRP (bp), PACK (nsize, 0));
-		PUT (FTRP (bp), PACK (nsize, 0));
+		PUT (HDRP (bp), PACK (asize, 0, 1));	// allocated block
+		PUT (FTRP (bp), PACK (asize, 0, 1));
+		bp = NEXT_BLKP (bp);			// fregmentation block
+		PUT (HDRP (bp), PACK (nsize, 1, 0));	// initionlization for
+		PUT (FTRP (bp), PACK (nsize, 1, 0));	// insereting into the rb tree
+		coalesce (bp);
 	}
 	else {
-		PUT (HDRP (bp), PACK (bsize, 1));
-		PUT (FTRP (bp), PACK (bsize, 1));
+		PUT (HDRP (bp), PACK (bsize, 0, 1));
+		PUT (FTRP (bp), PACK (bsize, 0, 1));
 	}
 }
 
@@ -239,13 +271,14 @@ void mm_free(void *ptr)
 //	printf ("starting free\n");
 	if (!GET_ALLOC (HDRP (ptr))) { //doubly-freed
 	    printf ("You doubly freed memory.\n");
-	    exit(-1);
+	    abort();
 	}
     
     	size_t size = GET_SIZE (HDRP (ptr));
 	
-	PUT (HDRP (ptr), PACK (size, 0));
-	PUT (FTRP (ptr), PACK (size, 0));
+	PUT (HDRP (ptr), PACK (size, 1, 0));	// initalization for 
+	PUT (FTRP (ptr), PACK (size, 1, 0));	// inserting into the rb tree
+
 	coalesce (ptr);
 
   	/* DON't MODIFY THIS STAGE AND LEAVE IT AS IT WAS */
@@ -260,30 +293,31 @@ static void *coalesce (void *bp){
 	size_t next_alloc = GET_ALLOC (HDRP (NEXT_BLKP (bp)));
 	size_t size = GET_SIZE (HDRP (bp));
 
-	if (prev_alloc && next_alloc) {
-		return bp;	// case 1: prev & next block is allocated
-	}
+	if (prev_alloc && next_alloc) ;	// case 1: prev & next blokc is allocated
 
 	else if (prev_alloc) {				// case 2: prev block is allocated only
-		size += GET_SIZE (HDRP (NEXT_BLKP (bp)));
-		PUT (HDRP (bp), PACK (size, 0));
-		PUT (FTRP (bp), PACK (size, 0));
+		size += GET_SIZE (HDRP (NEXT_BLKP (bp)));	// initialization for insertion
+		PUT (HDRP (bp), PACK (size, 1, 0));
+		PUT (FTRP (bp), PACK (size, 1, 0));
 	}
 
 	else if (next_alloc) {				// case 3: next block is allocated only
-		size += GET_SIZE (HDRP (PREV_BLKP (bp)));
-		PUT (FTRP (bp), PACK (size, 0));
-		PUT (HDRP (PREV_BLKP (bp)), PACK (size, 0));
+		size += GET_SIZE (HDRP (PREV_BLKP (bp)));	// initialization for insertion
+		PUT (FTRP (bp), PACK (size, 1, 0));
 		bp = PREV_BLKP (bp);
+		PUT (HDRP (bp), PACK (size, 1, 0));
 	}
 
 	else {						// case 4: nothing is allocated
 		size += GET_SIZE (HDRP (PREV_BLKP (bp))) + GET_SIZE (FTRP (NEXT_BLKP (bp)));
-		PUT (HDRP (PREV_BLKP (bp)), PACK (size, 0));
-		PUT (FTRP (NEXT_BLKP (bp)), PACK (size, 0));
+		PUT (HDRP (PREV_BLKP (bp)), PACK (size, 1, 0));	// initalization for insertion
+		PUT (FTRP (NEXT_BLKP (bp)), PACK (size, 1, 0));
 		bp = PREV_BLKP (bp);
 	}
 
+	*(char *)bp = NULL;
+	*(char *)(bp + WSIZE) = NULL;
+	//TODO: insert
 	return bp;
 }
 
@@ -313,3 +347,89 @@ void mm_exit(void)
 	}
 }
 
+
+/*
+static int rb_assert (); 
+static char *rb_remove (char *root, char *bp);
+*/
+/*
+ * Funcitons used to build & destruct Red-black tree
+ */
+static char *rot_single (char *root, int dir){
+	char *opposite = CHILD_GET (!dir, root);
+
+	CHILD_PUT (!dir, root, CHILD_GET (dir, opposite));
+	CHILD_PUT (dir, opposite, root);
+	
+	SET_RB (1, (HDRP (root)));
+	SET_RB (0, (HDRP (opposite)));
+
+	return opposite;
+}
+
+static char *rot_double (char *root, int dir){
+	CHILD_PUT (!dir, root, rot_single (CHILD_GET (!dir, root), !dir));
+
+	return rot_single (root, dir);
+}
+
+static int rb_insert (char *bp){
+	if (rb_root == NULL)	// Empty tree
+		rb_root = bp;
+	else {
+	    	/* setup for iterating */
+		PUT (HDRP (rb_head), 0);	// bp_head points the False root.
+		*rb_head = NULL;
+		*(rb_head + WSIZE) = NULL;
+
+		char *g, *t;	// Grandparent & parent
+		char *p, *q;	// Iterator & parent
+		int last, dir = 0;
+
+		t = rb_head;
+		g = p = NULL;
+		q = rb_root;
+		CHILD_PUT (1, t, rb_root);
+
+		/* iteration with searching */
+		while (1){
+			if (q == NULL){
+				q = bp;
+				CHILD_PUT (dir, p, q);
+			}
+			else if (IS_RED (CHILD_GET (0, q)) && IS_RED (CHILD_GET (1, q))) {
+				/* Color flip */
+			    	SET_RB (1, HDRP (q));
+				SET_RB (0, HDRP (CHILD_GET (0, q)));
+				SET_RB (0, HDRP (CHILD_GET (1, q)));
+			}
+
+			/* Fix red violation */
+			if ((IS_RED (q)) && (IS_RED (p))) {
+				int dir2 = (CHILD_GET (1, t) == g);
+
+				if (q == (CHILD_GET (last, p))) CHILD_PUT (dir2, t, rot_single (g, !last));
+				else CHILD_PUT (dir2, t, rot_double (g, !last));
+			}
+
+			/* Update direction */
+			if (q == bp) break;	// Stop if found
+			
+			last = dir;	
+			if ((GET_SIZE (HDRP (q))) == (GET_SIZE (HDRP (bp)))) dir = (q < bp);
+			else dir = ((GET_SIZE (HDRP (q))) < (GET_SIZE (HDRP (bp))));
+
+			/* Update helpers */
+			if (g != NULL) t = g;
+			g = p, p = q;
+			q = CHILD_GET (dir, q);
+		}
+	
+		/* Update root */
+		rb_root = CHILD_GET (dir, rb_head);
+	}
+
+	SET_RB (0, (HDRP (rb_root)));	// Make root black
+
+	return 1;
+}
