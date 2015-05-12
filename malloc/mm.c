@@ -69,7 +69,7 @@ static range_t **gl_ranges;
 #define GET_ALLOC(p)	(GET (p) & 0x1)
 
 /* Set RB flags */
-#define SET_RB(r, p)	((r)? (PUT (p, (GET (p) | 0x10))) : (PUT (p, (GET_SIZE (p) | GET_ALLOC(p)))))
+#define SET_RB(r, p)	((r)? (PUT (p, (GET (p) | 0x2))) : (PUT (p, (GET (p) & ~0x2))))
 
 /* Read and write the children pointer */
 #define CHILD_GET(f, bp)	((f)? (*(char **)(bp + WSIZE)) : (*(char **)(bp)))
@@ -84,7 +84,7 @@ static range_t **gl_ranges;
 #define PREV_BLKP(bp)	((char *)(bp) - GET_SIZE (((char *)(bp) - DSIZE)))
 
 /* Determine wether the node is red */
-#define IS_RED(bp)      ((bp != NULL) && (GET (HDRP (bp)) & 0x10))
+#define IS_RED(bp)      ((bp != NULL) && (GET (HDRP (bp)) & 0x2))
 
 
 /* 
@@ -118,6 +118,7 @@ static void *extend_heap (size_t words);
 static void *coalesce (void *bp);
 static void place (char *bp, size_t asize);
 static void *find_fit (size_t asize);
+static void simpl_free (char *ptr);
 /* functions used for rb tree */
 static char *rot_single (char *root, int dir);
 static char *rot_double (char *root, int dir);
@@ -199,8 +200,8 @@ static void *extend_heap (size_t words){
  */
 void* mm_malloc(size_t size)
 {
-	printf("Starting malloc. \n");
-//	printf("Heap start at %x\n", heap_listp);
+//	printf("Starting malloc. \n");
+//	printf("heq_listp at %x\n", heap_listp);
 //	printf("Heap size is %d\n", mem_heapsize());
 
 	size_t asize;			// Adjusted block size
@@ -225,6 +226,7 @@ void* mm_malloc(size_t size)
 	/* No fit found, Get more memory and place the block */
 	extendsize = MAX (asize, CHUNKSIZE);
 	if ((bp = extend_heap (extendsize / WSIZE)) == NULL) return NULL;
+	bp = rb_fit (asize);
 	place (bp, asize);
 	return bp;
 }
@@ -250,7 +252,7 @@ static void *find_fit (size_t asize){
 //		}
 //		else return NULL;
 //	}
-	char *block = rb_fit (asize);			// free block from rb tree;
+    	char *block = rb_fit (asize);			// free block from rb tree;
 	return block;					// TODO : we don't need this.
 
 }
@@ -281,9 +283,9 @@ static void place (char *bp, size_t asize){
  */
 void mm_free(void *ptr)
 {
-	printf ("starting free\n");
+//	printf ("starting free, freed bp is %x\n", ptr);
 	if (!GET_ALLOC (HDRP (ptr))) { //doubly-freed
-	    printf ("You doubly freed memory.\n");
+//	    printf ("You doubly freed memory.\n");
 	    abort();
 	}
     
@@ -349,13 +351,14 @@ static void *coalesce (void *bp){
 	}
 
 	/* insert bp in rb tree */
-	*(char *)bp = NULL;				// initializing for insertion
-	*(char *)(bp + WSIZE) = NULL;
-	printf ("hi\n");
+	*(char **)bp = NULL;				// initializing for insertion
+	*(char **)(bp + WSIZE) = NULL;
 	rb_insert (bp);			
+//	if (rb_root != NULL)
+//		printf ("after insertion, rb_root & it's size is %x, %d\n", rb_root, GET_SIZE (HDRP (rb_root)));
+//	else printf ("rb_root is NULL\n");
 	return bp;
 }
-
 
 /*
  * mm_realloc - empty implementation; YOU DO NOT NEED TO IMPLEMENT THIS
@@ -375,12 +378,34 @@ void mm_exit(void)
 	while (GET_SIZE (HDRP (p)) != 0){
 //	   	printf ("p is %x\n", p);
 		if (GET_ALLOC (HDRP (p))){
-		    mm_free (p);
+		    simpl_free (p);		// don't care about tree, but just free
 //		    printf ("p was freed\n");
 		}
 		p = NEXT_BLKP (p);
 	}
 }
+
+/*
+ * simpl_free - Just free, don't care tree.
+ */
+static void simpl_free(char *ptr)
+{
+//      printf ("starting free, freed bp is %x\n", ptr);
+        if (!GET_ALLOC (HDRP (ptr))) { //doubly-freed
+//          printf ("You doubly freed memory.\n");
+            abort();
+        }
+       
+        size_t size = GET_SIZE (HDRP (ptr));
+    
+        PUT (HDRP (ptr), PACK (size, 1, 0));    // initalization for 
+        PUT (FTRP (ptr), PACK (size, 1, 0));    // inserting into the rb tree
+
+        /* DON't MODIFY THIS STAGE AND LEAVE IT AS IT WAS */
+        if (gl_ranges)
+                remove_range(gl_ranges, ptr);
+}
+
 
 
 /*
@@ -461,6 +486,7 @@ static int rb_assert (char *root){
  * rb_insert - insert new free block with tow-down algorithm.
  */
 static void rb_insert (char *bp){
+//	printf ("start rb_insert\n");
 	if (rb_root == NULL)	// Empty tree
 		rb_root = bp;
 	else {
@@ -469,8 +495,8 @@ static void rb_insert (char *bp){
 		*rb_head = NULL;
 		*(rb_head + WSIZE) = NULL;
 
-		char *g, *t;	// Grandparent & parent
-		char *p, *q;	// Iterator & parent
+		char *g, *t;	// Grandparent & head
+		char *q, *p;	// Iterator & parent
 		int last, dir = 0;
 
 		t = rb_head;
@@ -478,8 +504,21 @@ static void rb_insert (char *bp){
 		q = rb_root;
 		CHILD_PUT (1, t, rb_root);
 
+//		printf ("inserting bp & it's size is %x, %d\n", bp, GET_SIZE (HDRP (bp)));
+//		printf ("rb_root & it's size & rb is %x, %d. %d\n", rb_root, GET_SIZE (HDRP (rb_root)), IS_RED (rb_root));
+
 		/* iteration with searching */
 		while (1){
+/*	                printf ("t, g, p, q, dir is %x, %x, %x, %x, %d\n", t, g, p, q, dir);  
+        	        printf ("q is alloc? %d\n", GET_ALLOC (HDRP (q)));
+			printf ("*q is %x\n", *q);
+	                if (q!=NULL) {
+				char *left = CHILD_GET (0, q);
+        		        char *right = CHILD_GET (1, q);
+                		printf ("left  is %x\n", left);
+	                	printf ("right is %x\n", right);
+			}
+*/
 			if (q == NULL){
 				q = bp;
 				CHILD_PUT (dir, p, q);
@@ -498,7 +537,7 @@ static void rb_insert (char *bp){
 				if (q == (CHILD_GET (last, p))) CHILD_PUT (dir2, t, rot_single (g, !last));
 				else CHILD_PUT (dir2, t, rot_double (g, !last));
 			}
-			
+
 			/* Update direction */
 			if (q == bp) break;	// Stop if found
 			
@@ -511,21 +550,20 @@ static void rb_insert (char *bp){
 			g = p, p = q;
 			q = CHILD_GET (dir, q);
 		}
-	
 		/* Update root */
-		rb_root = CHILD_GET (dir, rb_head);
+		rb_root = CHILD_GET (1, rb_head);
 	}
-
+	
 	SET_RB (0, (HDRP (rb_root)));	// Make root black
-
 	return ;
 }
+
 /*
  * rb_fit - find appropreate (best-fit) free block from rb_tree and return the pointer 
  *	    after remove it with top-down algorithm
  */
 static char *rb_fit (size_t size){
-	
+//	printf ("Starting rb_fit \n");	
     	if (rb_root == NULL) return NULL;	// empty tree
 
 	PUT (HDRP (rb_head), 0);        	// bp_head points the False root.
@@ -551,7 +589,10 @@ static char *rb_fit (size_t size){
 		g = p, p = q;
 		q = CHILD_GET (dir, q);
 		bsize = GET_SIZE (HDRP (q));
-		
+	
+//		printf ("g, p, q is %x, %x, %x\n", g, p, q);
+//		printf ("bsize, size is %d, %d\n", bsize, size);
+
 		if (same) {	// if we found already, just go down.
 			if (f == q) dir = 0;
 			else dir = 1;
@@ -559,7 +600,8 @@ static char *rb_fit (size_t size){
 		else {
 		    	dir = (bsize < size);
 			/* Save found best-fit block pointer at f */
-			if (same = (bsize == size)) {	// if block size is equal to wanted size,
+			same = (bsize == size);
+			if (same) {			// if block size is equal to wanted size,
 				f = q;			// this is the final f, so set same as 1.
 			}				// at right after found same size, go left.
 
@@ -567,40 +609,55 @@ static char *rb_fit (size_t size){
 			    	f = q;			// just save it in f and go left.
 			}
 		}
-
+/*
+		printf ("same is %d, dir is %d, f is %x\n", same, dir, f);
+		printf ("f's is_red is %d\n", IS_RED (f));
+		printf ("q is alloc? %d\n", GET_ALLOC (HDRP (q)));
+		char *left = CHILD_GET (0, q);
+		char *right = CHILD_GET (1, q);
+		printf ("left  is %x\n", left);
+		printf ("right is %x\n", right);
+		if (!(left == NULL))
+			printf ("left & it's size is %x, %d\n", left, GET_SIZE (HDRP (left)));
+		if (!(right == NULL))
+			printf ("right & it's size is %x, %d\n", left, GET_SIZE (HDRP (right)));
+*/
 		/* Push the red node down */
-		if (!(IS_RED(q)) && !(IS_RED (CHILD_GET (dir, q)))){	// double black
-			CHILD_PUT (last, p, rot_single (q, dir));
-			p = CHILD_GET (last, p);
-		}
-		else if (!(IS_RED (CHILD_GET (!dir, q)))) {	
-			char *s = CHILD_GET (!last, p);
+		if (!(IS_RED(q)) && !(IS_RED (CHILD_GET (dir, q)))) {	// double black
+		    	if (IS_RED (CHILD_GET (!dir, q))) {
+				CHILD_PUT (last, p, rot_single (q, dir));
+				p = CHILD_GET (last, p);
+			}
+			else if (!(IS_RED (CHILD_GET (!dir, q)))) {	
+			   	char *s = CHILD_GET (!last, p);
+	
+				if (s != NULL){
+					if (!(IS_RED (CHILD_GET (!last, s))) && !(IS_RED (CHILD_GET (last, s)))){
+						/* Color flip */
+		  				SET_RB (0, HDRP (p));
+						SET_RB (1, HDRP (s));
+						SET_RB (1, HDRP (q));
+					}
+					else {
+						int dir2 = (CHILD_GET (1, g) == p);
+						
+						if (IS_RED (CHILD_GET (last, s))) 
+							CHILD_PUT (dir2, g, rot_double (p, last));
+						else if (IS_RED (CHILD_GET (!last, s)))
+						    	CHILD_PUT (dir2, g, rot_single (p, last));
 
-			if (s != NULL){
-				if (!(IS_RED (CHILD_GET (!last, s))) && !(IS_RED (CHILD_GET (last, s)))) {
-					/* Color flip */
-	  				SET_RB (0, HDRP (p));
-					SET_RB (1, HDRP (s));
-					SET_RB (1, HDRP (q));
+						/* Ensure correct coloring */
+						SET_RB (1, CHILD_GET (dir2, g));
+						SET_RB (0, CHILD_GET (0, CHILD_GET (dir2, g)));
+						SET_RB (0, CHILD_GET (1, CHILD_GET (dir2, g)));
+					}
 				}
-				else {
-					int dir2 = (CHILD_GET (1, g) == p);
-					
-					if (IS_RED (CHILD_GET (last, s))) 
-						CHILD_PUT (dir2, g, rot_double (p, last));
-					else if (IS_RED (CHILD_GET (!last, s)))
-					    	CHILD_PUT (dir2, g, rot_single (p, last));
-
-					/* Ensure correct coloring */
-					SET_RB (1, CHILD_GET (dir2, g));
-					SET_RB (0, CHILD_GET (0, CHILD_GET (dir2, g)));
-					SET_RB (0, CHILD_GET (1, CHILD_GET (dir2, g)));
-				}
-			
 			}
 		}
 	}
 	
+//	printf ("found1 f is %x\n", f);
+
 	/* Replace and remove if found */
 	if (f != NULL) {
 		/* Find f's parent */
@@ -622,7 +679,7 @@ static char *rb_fit (size_t size){
 	/* Update root and make it black */
 	rb_root = CHILD_GET (1, rb_head);
 	if (rb_root != NULL) SET_RB (0, HDRP (rb_root));
-
+	
 	return f;
 }
 
@@ -631,7 +688,7 @@ static char *rb_fit (size_t size){
  *             after remove it with top-down algorithm
  */
 static char *rb_remove (char *bp){
-
+//	printf ("start rb_remove, finding bp is %x\n", bp);
         if (rb_root == NULL) return NULL;       // empty tree
 
         PUT (HDRP (rb_head), 0);                // bp_head points the False root.
@@ -658,7 +715,7 @@ static char *rb_remove (char *bp){
                 g = p, p = q;
                 q = CHILD_GET (dir, q);
                 bsize = GET_SIZE (HDRP (q));
-
+		
                 if (same) {     // if we found already, just go down.
 			if (f == q) dir = 0;
 			else dir = 1;
@@ -666,47 +723,62 @@ static char *rb_remove (char *bp){
                 else {
                         /* Save found best-fit block pointer at f */
                         if (bsize == size) {            // if block size is equal to wanted size, 
-                                if (same = (q == bp)) {	// found required block.
+			    	same = (q == bp);
+                                if (same) {		// found required block.
 					f = q;
 				}
 				dir = (q < bp);
                         }                              
                 	else dir = (bsize < size);
 		}
+/*
+                printf ("g, p, q is %x, %x, %x\n", g, p, q);  
+                printf ("bsize, size is %d, %d\n", bsize, size);
+
+                printf ("same is %d, dir is %d, f is %x\n", same, dir, f);
+                printf ("f's is_red is %d\n", IS_RED (f));
+                char *left = CHILD_GET (0, q);
+                char *right = CHILD_GET (1, q);
+                printf ("left  is %x\n", left);
+                printf ("right is %x\n", right);
+*/
 
                 /* Push the red node down */
                 if (!(IS_RED(q)) && !(IS_RED (CHILD_GET (dir, q)))){    // double black
-                        CHILD_PUT (last, p, rot_single (q, dir));
-                        p = CHILD_GET (last, p);
-                }
-                else if (!(IS_RED (CHILD_GET (!dir, q)))) {
-                        char *s = CHILD_GET (!last, p);
- 
-	                if (s != NULL){
-                        	if (!(IS_RED (CHILD_GET (!last, s))) && !(IS_RED (CHILD_GET (last, s)))) {
-                                	/* Color flip */
-                                        SET_RB (0, HDRP (p));
-                                        SET_RB (1, HDRP (s));
-                                        SET_RB (1, HDRP (q));
-                                }
-                                else {
-                                        int dir2 = (CHILD_GET (1, g) == p);
+                	if ((IS_RED (CHILD_GET (!dir, q)))) {
+			    	CHILD_PUT (last, p, rot_single (q, dir));
+        	                p = CHILD_GET (last, p);
+                	}
+	                else if (!(IS_RED (CHILD_GET (!dir, q)))) {
+        	                char *s = CHILD_GET (!last, p);
+ 	
+		                if (s != NULL){
+                	        	if (!(IS_RED (CHILD_GET (!last, s))) && !(IS_RED (CHILD_GET (last, s)))){
+                        	        	/* Color flip */
+                                	        SET_RB (0, HDRP (p));
+                                        	SET_RB (1, HDRP (s));
+	                                        SET_RB (1, HDRP (q));
+        	                        }
+                	                else {
+                        	                int dir2 = (CHILD_GET (1, g) == p);
+	
+        	                                if (IS_RED (CHILD_GET (last, s)))
+                	                                CHILD_PUT (dir2, g, rot_double (p, last));
+                        	                else if (IS_RED (CHILD_GET (!last, s)))
+                                	                CHILD_PUT (dir2, g, rot_single (p, last));
 
-                                        if (IS_RED (CHILD_GET (last, s)))
-                                                CHILD_PUT (dir2, g, rot_double (p, last));
-                                        else if (IS_RED (CHILD_GET (!last, s)))
-                                                CHILD_PUT (dir2, g, rot_single (p, last));
-
-                                        /* Ensure correct coloring */
-                                        SET_RB (1, CHILD_GET (dir2, g));
-                                        SET_RB (0, CHILD_GET (0, CHILD_GET (dir2, g)));
-                                        SET_RB (0, CHILD_GET (1, CHILD_GET (dir2, g)));
-                                }
-
-                        }
-                }
+	                                        /* Ensure correct coloring */
+        	                                SET_RB (1, CHILD_GET (dir2, g));
+                	                        SET_RB (0, CHILD_GET (0, CHILD_GET (dir2, g)));
+                        	                SET_RB (0, CHILD_GET (1, CHILD_GET (dir2, g)));
+                                	}
+                        	}
+                	}
+		}
         }
 
+//	printf ("found2 is %x\n", f);
+	
         /* Replace and remove if found */
         if (f != NULL) {
                 /* Find f's parent */
