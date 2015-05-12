@@ -498,7 +498,9 @@ static int rb_assert (char *root){
  * rb_insert - insert new free block with tow-down algorithm.
  */
 static void rb_insert (char *bp){
-	printf ("start rb_insert, inserting bp is %x, size is %d\n", bp, GET_SIZE (HDRP (bp)));
+	printf ("start rb_insert, inserting bp is %x, size is %u\n", bp, GET_SIZE (HDRP (bp)));
+	if (GET_SIZE (HDRP (bp)) > 1000000) abort();		// TODO: test
+
 	if (rb_root == NULL)	// Empty tree
 		rb_root = bp;
 	else {
@@ -782,17 +784,19 @@ static char *rb_remove (char *bp){
                         }                              
                 	else dir = (bsize < size);
 		}
-
+/*
 	        printf ("g, p, q is %x, %x, %x\n", g, p, q);  
-	        printf ("bsize, size is %d, %d\n", bsize, size);
-
+*/
+//		printf ("bsize, size is %u, %d\n", bsize, size);
+		printf ("bsize is %u, point %x\n", bsize, (char *)bsize);
+/*
                 printf ("same is %d, dir is %d, f is %x\n", same, dir, f);
                 printf ("g, p, q is_red is %d, %d, %d\n", IS_RED (g), IS_RED (p), IS_RED (q));
 		char *left = CHILD_GET (0, q);
                 char *right = CHILD_GET (1, q);
                 printf ("left  is %x, ", left);
                 printf ("right is %x\n", right);
-
+*/
 
                 /* Push the red node down */
                 if (!(IS_RED(q)) && !(IS_RED (CHILD_GET (dir, q)))){    // double black
