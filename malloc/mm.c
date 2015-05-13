@@ -53,7 +53,7 @@ static range_t **gl_ranges;
 #define WSIZE		4	// Word and header / footer size
 #define DSIZE		8	// Double word size
 #define CHUNKSIZE	(1<<12)	// Extend heap by yhis amount
-#define LIST_MAX	16	// segregated free list exist
+#define LIST_MAX	20	// segregated free list exist
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))
 
@@ -134,27 +134,27 @@ int mm_init(range_t **ranges)
 	int i;
 
 	/* Create the initial empty heap */
-  	if ((heap_listp = mem_sbrk (24*WSIZE)) == (void *) -1)
+	if ((heap_listp = mem_sbrk (24*WSIZE)) == (void *) -1)
 		return -1;
-  	PUT (heap_listp, 0);					// Alignment padding
-	for (i=1; i<=LIST_MAX; i++) 
+    	PUT (heap_listp, 0);					// Alignment padding
+    	for (i=1; i<=LIST_MAX; i++) 
 		*(char **)(heap_listp + i * WSIZE) = NULL;	// 20 seg list pointer 	
-	PUT (heap_listp + (21*WSIZE), PACK (DSIZE, 1));	// Prologue header
-	PUT (heap_listp + (22*WSIZE), PACK (DSIZE, 1));	// Prologue footer
+    	PUT (heap_listp + (21*WSIZE), PACK (DSIZE, 1));	// Prologue header
+    	PUT (heap_listp + (22*WSIZE), PACK (DSIZE, 1));	// Prologue footer
 	PUT (heap_listp + (23*WSIZE), PACK (0, 1));		// Epilogue header
-	seg_lists = heap_listp + WSIZE;
-	heap_listp += 22*WSIZE;
-//	printf ("heap_listp is %x\n", heap_listp);
-//	printf ("seg_lists is %x\n", seg_lists);
-  	
+    	seg_lists = heap_listp + WSIZE;
+    	heap_listp += 22*WSIZE;
+    //	printf ("heap_listp is %x\n", heap_listp);
+    //	printf ("seg_lists is %x\n", seg_lists);
+	    
 	/* Extend the empty heap with a free block of CHUNKSIZE bytes */
-  	if (extend_heap (CHUNKSIZE/WSIZE) == NULL)
+	if (extend_heap (CHUNKSIZE/WSIZE) == NULL)
 		return -1;
 
-  	/* DON't MODIFY THIS STAGE AND LEAVE IT AS IT WAS */
-  	gl_ranges = ranges;
+	/* DON't MODIFY THIS STAGE AND LEAVE IT AS IT WAS */
+	gl_ranges = ranges;
 
-  	return 0;
+	return 0;
 }
 
 /*
@@ -166,29 +166,29 @@ static void *extend_heap (size_t words){
 
 	/* Allocate an even number of words to maintain alignment */
 	size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
-	
-	if (size < 2*DSIZE) size = 2*DSIZE;
+	    
+	if (size < 2*DSIZE) size = 2*DSIZE;		// TODO : DIFER
 	if ((long)(bp = mem_sbrk(size)) == -1)
 		return NULL;
 
-//	printf ("extend_heap with size %u, last bit is %x\n", size, mem_heap_hi());
+    //	printf ("extend_heap with size %u, last bit is %x\n", size, mem_heap_hi());
 
-//	printf("bp is %x\n", bp);
-	
-//	printf("GET_ALLOC bp is %d\n", GET_ALLOC (HDRP (bp)));
-//	printf("GET_SIZE bp is %d\n", GET_SIZE (HDRP (bp)));
-	
+    //	printf("bp is %x\n", bp);
+	    
+    //	printf("GET_ALLOC bp is %d\n", GET_ALLOC (HDRP (bp)));
+    //	printf("GET_SIZE bp is %d\n", GET_SIZE (HDRP (bp)));
+	    
 	/* Initialize free block header/footer and the epilogue header */
 	PUT (HDRP (bp), PACK (size, 0));	// Free block header
 	PUT (FTRP (bp), PACK (size, 0));	// Free block footer
 	PUT (HDRP (NEXT_BLKP (bp)), PACK (0, 1));	// New epilogue header
-       
-//	printf("bp is %x\n", bp);
-//	printf("GET_ALLOC bp is %d\n", GET_ALLOC (HDRP (bp)));
-//	printf("GET_SIZE bp is %d\n", GET_SIZE (HDRP (bp)));
-//	SET_NP (bp, NULL);
-//	SET_PP (bp, NULL);
-//	seg_insert (bp);
+	   
+    //	printf("bp is %x\n", bp);
+    //	printf("GET_ALLOC bp is %d\n", GET_ALLOC (HDRP (bp)));
+    //	printf("GET_SIZE bp is %d\n", GET_SIZE (HDRP (bp)));
+    //	SET_NP (bp, NULL);
+    //	SET_PP (bp, NULL);
+    //	seg_insert (bp);
 
 	/* Coalesce if the previous block was free */
 	return coalesce (bp);
@@ -206,7 +206,7 @@ void* mm_malloc(size_t size)
 
 	size_t asize;			// Adjusted block size
 	size_t extendsize;		// Amount to extend heap if no fit
-	char *bp;
+	char *bp = NULL;
 
 	/* Ignore spurious requests */
 	if (size == 0) return NULL;
@@ -214,34 +214,43 @@ void* mm_malloc(size_t size)
 	/* Adjust block size to include overhead and alignment reqs. */
 	if (size <= DSIZE) asize = 2*DSIZE;
 	else asize = DSIZE * ((size + (DSIZE) + (DSIZE - 1)) / DSIZE);
-	
 
 	/* Search the free list for a fit */
 	if ((bp = find_fit (asize)) != NULL) {
-	    	seg_delete (bp);
+		seg_delete (bp);
 		place (bp, asize);
 		return bp;
 	}
-	
+	    
 	/* No fit found, Get more memory */
 	extendsize = MAX (asize, CHUNKSIZE);
 	if ((bp = extend_heap (extendsize / WSIZE)) == NULL) return NULL;
-/*	if ((bp == extend_heap (asize / WSIZE)) == NULL) reutrn NULL;
-	PUT (HDRP (bp), PACK (asize, 1));
-	PUT (FTRP (bp), PACK (asize, 1));
-*/
 	seg_delete (bp);
 	place (bp, asize);
 
-//	printf ("allocated block is %x, size is %u\n", bp, GET_SIZE (HDRP (bp)));
+/*
+	if ((bp == extend_heap (asize / WSIZE)) == NULL) reutrn NULL;
+PUT (HDRP (bp), PACK (asize, 1));
+PUT (FTRP (bp), PACK (asize, 1));
+*/
+/*
+	bp = extend_heap (asize / WSIZE);
+	PUT (HDRP (bp), PACK (asize, 1));
+	PUT (FTRP (bp), PACK (asize, 1));
+	extend_heap (asize / WSIZE);
+	extend_heap (asize / WSIZE);
+*/
+
+    //	printf ("allocated block is %x, size is %u\n", bp, GET_SIZE (HDRP (bp)));
 	return bp;
 }
 
 /*
  * find_fit - find appropreate block by searching in segregated free list.
  */
+
 static char *find_fit (size_t asize) {
-//   	printf ("finding fit with size %u, ", asize);
+    //   	printf ("finding fit with size %u, ", asize);
 	size_t size = asize;
 	char *bp = NULL;
 	int i;
@@ -254,12 +263,9 @@ static char *find_fit (size_t asize) {
                 	}
 		}
                 if (bp != NULL) break;
+		size >>= 1;
         }
-/*	if (bp == NULL) {
-		printf ("didn't found \n");
-	}
-	else printf ("found bp is %x, it's size is %u\n", bp, GET_SIZE (HDRP (bp)));
-*/	return bp;
+	return bp;
 }
 
 /*
@@ -404,13 +410,13 @@ static void seg_insert (char *bp) {
     	
 //    	printf ("inserting %x, size is %u\n", bp, GET_SIZE (HDRP (bp)));
 	size_t size = GET_SIZE (HDRP (bp));
-	size_t tmpsize = size >> 4;	// smallest block size is 16
+//	size_t tmpsize = size >> 4;	// smallest block size is 16
 	int i;				// iterator
 	char *curr, *prev = NULL;	// current, previous pointer
 	
 	/* Find segregated list */
-	for (i = 0; (i < LIST_MAX -1) && (tmpsize > 1); i ++) {
-		tmpsize >>= 1;
+	for (i = 0; (i < LIST_MAX -1) && (size > 1); i ++) {
+		size >>= 1;
 	}
 
 	/* Search appropriate block in the selected segregated list */
@@ -458,12 +464,12 @@ static void seg_insert (char *bp) {
  */
 static char *seg_delete (char *bp) {
 //	printf ("seg_delete %x\n", bp);
-    	size_t tmpsize, size = GET_SIZE (HDRP (bp));
+    	size_t size = GET_SIZE (HDRP (bp));
 	int i;
-	tmpsize = size >> 4;
+//	tmpsize = size >> 4;
 	/* Find segregated list */
-	for (i = 0; (i < LIST_MAX -1) && (tmpsize > 1); i++) {
-		tmpsize >>= 1;
+	for (i = 0; (i < LIST_MAX -1) && (size > 1); i++) {
+		size >>= 1;
 	}
 
 	char *next = GET_NP (bp);
