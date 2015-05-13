@@ -207,6 +207,7 @@ void* mm_malloc(size_t size)
 	size_t asize;			// Adjusted block size
 	size_t extendsize;		// Amount to extend heap if no fit
 	char *bp = NULL;
+	int i=0;
 
 	/* Ignore spurious requests */
 	if (size == 0) return NULL;
@@ -215,13 +216,31 @@ void* mm_malloc(size_t size)
 	if (size <= DSIZE) asize = 2*DSIZE;
 	else asize = DSIZE * ((size + (DSIZE) + (DSIZE - 1)) / DSIZE);
 
+
+	size = asize;		// TODO: check..
+	while (i < LIST_MAX) {
+		if ((i == LIST_MAX - 1) || (size <= 1) && (NTH(i, seg_lists) != NULL)) {
+			bp = NTH (i, seg_lists);
+			while ((bp != NULL) && (asize > GET_SIZE (HDRP (bp)))) bp = GET_NP (bp);
+			if (bp != NULL) break;
+		}
+		size >>= 1;
+		i ++;
+	}
+	if (bp != NULL) {
+		seg_delete (bp);
+		place (bp, asize);
+		return bp;
+	}
+
 	/* Search the free list for a fit */
+/*
 	if ((bp = find_fit (asize)) != NULL) {
 		seg_delete (bp);
 		place (bp, asize);
 		return bp;
 	}
-	    
+*/	    
 	/* No fit found, Get more memory */
 	extendsize = MAX (asize, CHUNKSIZE);
 	if ((bp = extend_heap (extendsize / WSIZE)) == NULL) return NULL;
@@ -248,7 +267,7 @@ PUT (FTRP (bp), PACK (asize, 1));
 /*
  * find_fit - find appropreate block by searching in segregated free list.
  */
-
+/*
 static char *find_fit (size_t asize) {
     //   	printf ("finding fit with size %u, ", asize);
 	size_t size = asize;
@@ -267,6 +286,7 @@ static char *find_fit (size_t asize) {
         }
 	return bp;
 }
+*/
 
 /*
  * place - after find appropreate block, resize it and place new block.
