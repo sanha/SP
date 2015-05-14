@@ -136,6 +136,9 @@ static void simpl_free (char *ptr);
 /* function for segregated list */
 static void seg_insert (char *bp);
 static char *seg_delete (char *bp);
+/* mm_check */
+static int mm_check();
+
 
 /*
  * mm_init - initialize the malloc package.
@@ -157,8 +160,8 @@ int mm_init(range_t **ranges)
     	heap_listp += 22*WSIZE;
 	    
 	/* Extend the empty heap with a free block of CHUNKSIZE bytes */
-	if (extend_heap (CHUNKSIZE/WSIZE) == NULL)
-		return -1;
+//	if (extend_heap (CHUNKSIZE/WSIZE) == NULL)
+//		return -1;
 
 	/* DON't MODIFY THIS STAGE AND LEAVE IT AS IT WAS */
 	gl_ranges = ranges;
@@ -190,32 +193,6 @@ static void *extend_heap (size_t words){
 	return coalesce (bp);
 }
 
-//TODO: maybe delete?
-static void *extend_asize (size_t words){
-        char *bp;
-        size_t size;
-
-        /* Allocate an even number of words to maintain alignment */
-        size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
-    
-        if (size < 2*DSIZE) size = 2*DSIZE;             
-        if ((long)(bp = mem_sbrk(size)) == -1) 
-                return NULL;
-
-        /* Initialize free block header/footer and the epilogue header */
-        PUT (HDRP (bp), PACK (size, 0));        // Free block header
-        PUT (FTRP (bp), PACK (size, 0));        // Free block footer
-        PUT (HDRP (NEXT_BLKP (bp)), PACK (0, 1));       // New epilogue header
-    
-        /* Coalesce if the previous block was free */
-        SET_NP (bp, NULL);                              // initializing for insertion
-        SET_PP (bp, NULL);
-        seg_insert (bp);
-
-        return bp;
-}
-
-
 
 /*
  * mm_malloc - Allocate a block by incrementing the brk pointer.
@@ -243,12 +220,11 @@ void* mm_malloc(size_t size)
 	/* No fit found, Get more memory */	
 	extendsize = MAX (asize, CHUNKSIZE);
         if ((bp = extend_heap (extendsize / WSIZE)) == NULL) return NULL;
-//	if ((bp = extend_heap (asize / WSIZE)) == NULL) return NULL;
 	seg_delete (bp);
 	place (bp, asize);
 
-//	extend_asize (asize / WSIZE);
-//	extend_asize (asize / WSIZE);
+	/* run heap checker */
+//	mm_check();
 
 	return bp;
 }
@@ -480,3 +456,43 @@ static void simpl_free(char *ptr) {
                 remove_range(gl_ranges, ptr);
 }
 
+/* 
+ * mm_check - Heap consistency Checker
+ *	      this function check wether all free block in the seg list pointing valid addres, marked free,
+ *	      and there are no free block that escaped from coalescing.
+ */
+static int mm_check (){
+	int i=0;
+
+	char *iter= NTH(i, seg_lists);		// check all free block in the seg list pointing valid address.
+						// also, marked free.
+	while (i<LIST_MAX) {
+		while (iter != NULL){
+			if ((heap_listp > iter) | (iter > mem_heap_hi())) {
+				printf ("this pointer pointing out of the heap\n");
+				abort();
+			}
+			if (GET_ALLOC (HDRP (iter)) != 0) {
+				printf ("this block in seg list didn't marked free\n");
+				abort();
+			}
+			iter = GET_NP (iter);
+		}
+		i ++;
+		iter = NTH (i, seg_lists);
+	}
+
+	char *p = NEXT_BLKP (heap_listp);	// check there are no free block that escaped from coalescing.
+	char *prev = NULL;
+	while (GET_SIZE (HDRP (p)) != 0) {
+		if (GET_ALLOC (HDRP (p)) == 0) {
+			if (prev != NULL) {
+				printf ("there is some free block escaped from coalesce\n");
+				abort();
+			}
+			prev = p;
+		}
+		else prev = NULL;
+		p = NEXT_BLKP (p);
+	}
+}
