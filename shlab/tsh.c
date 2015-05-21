@@ -4,8 +4,8 @@
  *
  * tsh - A tiny shell program with job control
  *
- * Name: <fill in>
- * Student id: <fill in>
+ * Name: Sanha Lee
+ * Student id: 2013-11415
  *
  */
 #include <stdio.h>
