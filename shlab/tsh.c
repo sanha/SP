@@ -175,7 +175,26 @@ int main(int argc, char **argv)
  */
 void eval(char *cmdline)
 {
-  return;
+	printf ("start eval\n");
+
+	char *argv[MAXARGS] = {NULL};
+	int bg = parseline (cmdline, argv);
+/*
+	if (bg) printf ("run it in background\n");
+	else printf ("run it in foreground\n");
+
+	int i=0;
+	while (argv[i] != NULL) {
+		printf ("argv string is: %s\n", argv[i]);
+		i++;
+	}
+*/
+
+	if (! builtin_cmd (argv)) {
+		printf ("not a built-in cmd!\n");
+	}
+
+	return;
 }
 
 /*
@@ -241,7 +260,17 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv)
 {
-  return 0;     /* not a builtin command */
+//	printf ("argv[0] is: %s\n", argv[0]);
+
+//	printf ("strcmp hi hi is %d\n", strcmp ("hi", "hi"));
+//	printf ("strcmp hello hi is %d\n", strcmp ("hello", "hi"));
+
+  	if (strcmp (argv[0], "quit") == 0) exit(1);
+	else if (strcmp (argv[0], "jobs") == 0) listjobs(jobs);
+	else if (strcmp (argv[0], "bg") == 0 || strcmp (argv[0], "fg") == 0) do_bgfg (argv);
+	else return 0;     /* not a builtin command */
+
+	return 1;
 }
 
 /*
