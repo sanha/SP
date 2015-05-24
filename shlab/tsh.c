@@ -178,7 +178,9 @@ void eval(char *cmdline)
     	/* parse cmdline into string list argv */
 	char *argv[MAXARGS] = {NULL};			
 	int bg = parseline (cmdline, argv);	
-	
+
+	if (argv[0] == NULL) return;			// empty command
+
 	if (! builtin_cmd (argv)) {			// if it is not a built-in command
 		/* construct signal set and block SIGCHLD */
 		sigset_t sigset;
@@ -190,9 +192,9 @@ void eval(char *cmdline)
 		int pid = fork();
 
 		if (pid == 0) {			// child process
-			setpgid(0, 0);		// put the child in a new process group
-			
+			setpgid(0, 0);		// put the child in a new process group	
 			sigprocmask (SIG_UNBLOCK, &sigset, NULL);	// unblock SIGCHLD before the job
+
 			if (execve (argv[0], argv, environ) < 0) {	
 				printf ("%s: Command not found\n", argv[0]);
 				exit (1);				
@@ -348,7 +350,7 @@ void waitfg(pid_t pid)
 {
 	/* wait until foreground pid is not equal to pid */
     	while (fgpid(jobs) == pid) {
-		sleep (0.1);
+		sleep (2);
 	}
 
 	if (verbose) printf ("waitfg: Process (%d) no longer the fg process\n", pid);
@@ -374,8 +376,7 @@ void sigchld_handler(int sig)
 
 	/* wait until some child is terminated */
 	pid_t pid_ch, jid_ch ;
-//TODO : CHECK
-	if ((pid_ch = waitpid (-1, &status, WUNTRACED | WNOHANG)) > 0) {	// wait any terminated child
+	while ((pid_ch = waitpid (-1, &status, WUNTRACED | WNOHANG)) > 0) {	// wait any terminated child
 	    	jid_ch = pid2jid (pid_ch);
 	    	if (verbose) printf ("sigchld_handler: Job [%d] (%d) deleted\n", jid_ch, pid_ch);
 		if (WIFEXITED (status)) {		// case 1: child process terminated normally
