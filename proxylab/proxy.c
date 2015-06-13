@@ -4,9 +4,13 @@
  * Student ID: 2013-11415
  *         Name: Sanha Lee
  * 
- * IMPORTANT: Give a high level description of your code here. You
- * must also provide a header comment at the beginning of each
- * function that describes what that function does.
+ * This proxy server acts like server to client, and
+ * like client to real destinated server.
+ *
+ * To deal with multiple client at the same time,
+ * thread based concurrent programming tachniques are used.
+ * Therefore, every function called by thread is thread-safe.
+ *
  */ 
 
 #include "csapp.h"
@@ -38,9 +42,21 @@ void logging (char *IP, int port, size_t size, char *msg, sem_t *mutexp);
 /*
  * Global variables
  */
+void *proxy_thread (void *vargp);
 sem_t mutex;	// semaphores
 int bytecnt = 0;
 int proxy_port = 0;
+
+/*
+ * thread_info structure containing information needed by thread.
+ */
+struct thread_info {
+	int tnum;	// thread number. used to debugging
+	int *fdp;	// file descriptor pointer.
+	char haddr[32];
+	int client_port;
+};
+
 
 /*
  * main - Main routine for the proxy program
@@ -59,11 +75,14 @@ int main(int argc, char **argv)
 	/* initialize semaphores */
 	sem_init (&mutex, 0, 1);
 
+	/* get port */
 	int port = atoi(argv[1]);
 	proxy_port = port;
+	
 	struct sockaddr_in clientaddr;
 	int clientlen = sizeof (clientaddr);
 	pthread_t tid; 
+	int tnum = 0;		// thread number, used for debugging
 
 	int listenfd = open_listenfd(port);
 	while (1) {
@@ -73,6 +92,7 @@ int main(int argc, char **argv)
 	        int client_port;
 
 	        *connfdp = Accept(listenfd, (SA *) &clientaddr, &clientlen);
+
         	/* determine the domain name and IP address of the client */
 	        hp = Gethostbyaddr((const char *)&clientaddr.sin_addr.s_addr, 
         		sizeof(clientaddr.sin_addr.s_addr), AF_INET);
@@ -83,78 +103,100 @@ int main(int argc, char **argv)
         	client_port = ntohs (clientaddr.sin_port);
 		V (&mutex);
 
-	        printf("Proxy server connected to %s (%s), port %d\n",
-        		hp->h_name, haddrp, client_port);	// TODO: CHECK
+	        printf ("Proxy server connected to %s (%s), port %d\n", hp->h_name, haddrp, client_port);
 
-		/* Sequential proxy, acting like client */
-		char buf[MAXLINE];
-		size_t n;
-		rio_t rio_client, rio_server;
-
-		Rio_readinitb (&rio_client, *connfdp);		// Initialize client robust I/O //TODO: check
-		while ((n = Rio_readlineb_w (&rio_client, buf, MAXLINE)) != 0) {	// reading msg from client
-			char *host;
-			char *port;
-			char *msg;
-			int clientfd;
-
-			P (&mutex);
-			bytecnt += n;	// TODO: thread!
-			V (&mutex);
-
-			printf ("Main while loop received %d bytes (%d total)\n", (int) n, bytecnt);	// TODO:
-
-			/* parsing client's input */
-			if (parse_client (buf, &host, &port, &msg, &mutex) < 0) {
-				char *err = "proxy usage: <host> <port> <message>\n";
-				printf ("%s", err);	// TODO:
-				Rio_writen_w (*connfdp, err, strlen (err));
-				continue;
-			}
-
-			/* make port to integer */
-			P (&mutex);
-			unsigned int port_num = (unsigned int) atoi (port);
-			V (&mutex);
-
-			/* Destination port have to be differ from proxy's port */
-                        if (port_num == proxy_port) {
-                                char *err = "connecting server port have to be different with proxy's\n";
-                                Rio_writen_w (*connfdp, err, strlen (err));
-                                continue;
-                        }
-
-
-			/* open clientfd as a proxy client */
-			if ((clientfd = open_clientfd_ts (host, port_num, &mutex)) < 0) {
-				char *err = "proxy couldn't open clientfd\n";
-				printf ("%s", err);	// TODO:
-				Rio_writen_w (*connfdp, err, strlen (err));
-				continue;
-			}	
-
-			printf ("Client request is: Host %s, Port %d, Msg %s", host, port_num, msg);
-
-			/* interact with real server: msg sending and receiving, logging */
-			Rio_readinitb (&rio_server, clientfd);		// initialize server robust I/O
-			Rio_writen_w (clientfd, msg, strlen (msg));	// sending message
-			if ((n = Rio_readlineb_w (&rio_server, buf, MAXLINE)) == 0) {
-				char *err = "proxy couldn't receive msg from server\n";
-				printf ("%s", err);	// TODO:
-				Rio_writen_w (*connfdp, err, strlen (err));				
-				continue;
-			}
-			else {
-				logging (haddrp, client_port, n, buf, &mutex);	// logging
-				Rio_writen_w (*connfdp, buf, strlen (buf));	// serve recieved contents
-				Close (clientfd);
-			}
-		}
-		Close (*connfdp);
-//	        Pthread_create(&tid, NULL, echo_thread, connfdp);
+		struct thread_info *tinfo = Malloc (sizeof (struct thread_info));
+		tnum ++;
+		tinfo->tnum = tnum;
+		tinfo->fdp = connfdp;
+		strcpy(tinfo->haddr, haddrp);
+		tinfo->client_port = client_port;
+	        Pthread_create(&tid, NULL, proxy_thread, tinfo);
 	}   
-	exit(0);
+	exit(0);	// terminates all thread except detached thread.
 }
+
+/*
+ * proxy_thread: thread dealing with client's request.
+ * have to use only thread-safe functions.
+ */ 
+void *proxy_thread (void *vargp) {
+        /* get client's informaiton and detach thread */
+	struct thread_info *tinfo = (struct thread_info *)vargp;
+	int connfd = *(tinfo->fdp);
+	Free (tinfo->fdp);
+	char haddr[32];
+	strcpy (haddr, tinfo->haddr);		// we have to copy the information itself, not pointer
+	int client_port = tinfo->client_port;
+	Pthread_detach (pthread_self());
+	Free (vargp);
+
+	/* setup for service */
+        char buf[MAXLINE];
+        size_t n;
+        rio_t rio_client, rio_server;
+
+	/* reading client */
+        Rio_readinitb (&rio_client, connfd);          // Initialize client robust I/O 
+        while ((n = Rio_readlineb_w (&rio_client, buf, MAXLINE)) != 0) {        // reading msg from client
+		char *host;
+                char *port;
+                char *msg;
+                int clientfd;
+
+                P (&mutex);
+                bytecnt += n;   
+                V (&mutex);
+                
+		/* parsing client's input */
+                if (parse_client (buf, &host, &port, &msg, &mutex) < 0) {
+	                char *err = "proxy usage: <host> <port> <message>\n";
+                        printf ("%s", err);
+                        Rio_writen_w (connfd, err, strlen (err));
+                        continue;
+                }
+
+                /* make port to integer */
+                P (&mutex);
+                unsigned int port_num = (unsigned int) atoi (port);
+                V (&mutex);
+
+                /* Destination port have to be differ from proxy's port */
+                if (port_num == proxy_port) {
+                        char *err = "connecting server port have to be different with proxy's\n";
+                        Rio_writen_w (connfd, err, strlen (err));
+                        continue;
+                }
+
+
+                /* open clientfd as a proxy client */
+                if ((clientfd = open_clientfd_ts (host, port_num, &mutex)) < 0) {
+                        char *err = "proxy couldn't open clientfd\n";
+                        printf ("%s", err);
+                        Rio_writen_w (connfd, err, strlen (err));
+                        continue;
+                }
+
+                /* interact with real server: msg sending and receiving, logging */
+                Rio_readinitb (&rio_server, clientfd);          // initialize server robust I/O
+                Rio_writen_w (clientfd, msg, strlen (msg));     // sending message
+                if ((n = Rio_readlineb_w (&rio_server, buf, MAXLINE)) == 0) {
+                        char *err = "proxy couldn't receive msg from server\n";
+                        printf ("%s", err);
+                        Rio_writen_w (connfd, err, strlen (err));
+			Close (clientfd);
+                        continue;
+                }
+                else {
+                        logging (haddr, client_port, n, buf, &mutex);  // logging
+                        Rio_writen_w (connfd, buf, strlen (buf));     // serve recieved contents
+                        Close (clientfd);
+                }
+        }
+        Close (connfd);
+	pthread_exit((void *)0);
+}
+
 
 /*
  * parse_client: parsing client message into host, port, message.
@@ -191,7 +233,7 @@ int parse_client (char *buf, char **host, char **port, char **msg, sem_t *mutexp
  */
 void logging (char *IP, int port, size_t size, char *msg, sem_t *mutexp) {
 	time_t timer;
-	char sport[MAXLINE];
+	char sport[32];
 	char ssize[MAXLINE];
 
 	P (mutexp);
@@ -215,7 +257,9 @@ void logging (char *IP, int port, size_t size, char *msg, sem_t *mutexp) {
 	Rio_writen_w (fd, ssize, strlen (ssize));
 	Rio_writen_w (fd, " ", 1);
 	Rio_writen_w (fd, msg, strlen (msg));
-	
+
+	Close (fd);
+
 	V (mutexp);
 } 
 
@@ -228,7 +272,6 @@ void logging (char *IP, int port, size_t size, char *msg, sem_t *mutexp) {
 int open_clientfd_ts(char *hostname, int port, sem_t *mutexp) {
 	int clientfd;
     	struct hostent *hp;
-//TODO:	struct *pirv_hp = (struct hostent *)malloc (sizeof (struct hostent));
 	struct sockaddr_in serveraddr;
 
 	if ((clientfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)

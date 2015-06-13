@@ -2,9 +2,9 @@ CC=gcc -m32
 CFLAGS=-O2 -Wall
 LIBS=-lpthread
 
-FILES = Makefile csapp.h csapp.c echoclient.c echoservert.c echo.c proxy.c
+FILES = Makefile csapp.h csapp.c echoclient.c echoservert.c echo.c proxy.c echoauto.c
 
-PROGS = echoclient echoserver proxy
+PROGS = echoclient echoserver proxy echoauto
 
 all: $(PROGS)
 
@@ -16,6 +16,9 @@ echoserver: echoservert.c csapp.o csapp.h echo.o echo.h
 
 proxy: proxy.c csapp.o csapp.h
 	$(CC) $(CFLAGS) -o proxy proxy.c csapp.o $(LIBS)
+
+echoauto: echoauto.c csapp.o csapp.h
+	$(CC) $(CFLAGS) -o echoauto echoauto.c csapp.o $(LIBS)
 
 only: proxy.c csapp.o csapp.h
 	$(CC) $(CFLAGS) -o proxy proxy.c csapp.o $(LIBS)

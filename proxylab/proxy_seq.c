@@ -198,7 +198,8 @@ void logging (char *IP, int port, size_t size, char *msg) {
 	Rio_writen_w (fd, ssize, strlen (ssize));
 	Rio_writen_w (fd, " ", 1);
 	Rio_writen_w (fd, msg, strlen (msg));
-	
+
+	Close (fd);
 } 
 
 
