@@ -17,6 +17,18 @@ echoserver: echoservert.c csapp.o csapp.h echo.o echo.h
 proxy: proxy.c csapp.o csapp.h
 	$(CC) $(CFLAGS) -o proxy proxy.c csapp.o $(LIBS)
 
+only: proxy.c csapp.o csapp.h
+	$(CC) $(CFLAGS) -o proxy proxy.c csapp.o $(LIBS)
+
+open1: 
+	./echoserver 12345 &
+
+open2:
+	./proxy 4321 &
+
+open3:
+	./echoclient localhost 4321
+
 csapp.o: csapp.c csapp.h
 	$(CC) $(CFLAGS) -c csapp.c
 

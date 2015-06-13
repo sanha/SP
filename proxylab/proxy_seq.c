@@ -32,13 +32,12 @@ void Rio_writen_w(int fd, void *usrbuf, size_t n);
 /*
  * Function added
  */
-int parse_client (char *buf, char **host, char **port, char **msg, sem_t *mutexp);
-void logging (char *IP, int port, size_t size, char *msg, sem_t *mutexp);
+int parse_client (char *buf, char **host, char **port, char **msg);
+void logging (char *IP, int port, size_t size, char *msg);
 
 /*
  * Global variables
  */
-sem_t mutex;	// semaphores
 int bytecnt = 0;
 int proxy_port = 0;
 
@@ -55,9 +54,6 @@ int main(int argc, char **argv)
 
 	/* Protect thread from terminated because of close1d fd */
 	Signal (SIGPIPE, SIG_IGN);
-
-	/* initialize semaphores */
-	sem_init (&mutex, 0, 1);
 
 	int port = atoi(argv[1]);
 	proxy_port = port;
@@ -78,10 +74,8 @@ int main(int argc, char **argv)
         		sizeof(clientaddr.sin_addr.s_addr), AF_INET);
 
 		/* Have to protect race from ntoa ntohs */
-		P (&mutex);
 	        haddrp = inet_ntoa (clientaddr.sin_addr);
         	client_port = ntohs (clientaddr.sin_port);
-		V (&mutex);
 
 	        printf("Proxy server connected to %s (%s), port %d\n",
         		hp->h_name, haddrp, client_port);	// TODO: CHECK
@@ -98,14 +92,12 @@ int main(int argc, char **argv)
 			char *msg;
 			int clientfd;
 
-			P (&mutex);
 			bytecnt += n;	// TODO: thread!
-			V (&mutex);
 
 			printf ("Main while loop received %d bytes (%d total)\n", (int) n, bytecnt);	// TODO:
 
 			/* parsing client's input */
-			if (parse_client (buf, &host, &port, &msg, &mutex) < 0) {
+			if (parse_client (buf, &host, &port, &msg) < 0) {
 				char *err = "proxy usage: <host> <port> <message>\n";
 				printf ("%s", err);	// TODO:
 				Rio_writen_w (*connfdp, err, strlen (err));
@@ -113,9 +105,7 @@ int main(int argc, char **argv)
 			}
 
 			/* make port to integer */
-			P (&mutex);
 			unsigned int port_num = (unsigned int) atoi (port);
-			V (&mutex);
 
 			/* Destination port have to be differ from proxy's port */
                         if (port_num == proxy_port) {
@@ -126,7 +116,7 @@ int main(int argc, char **argv)
 
 
 			/* open clientfd as a proxy client */
-			if ((clientfd = open_clientfd_ts (host, port_num, &mutex)) < 0) {
+			if ((clientfd = open_clientfd (host, port_num)) < 0) {
 				char *err = "proxy couldn't open clientfd\n";
 				printf ("%s", err);	// TODO:
 				Rio_writen_w (*connfdp, err, strlen (err));
@@ -145,7 +135,7 @@ int main(int argc, char **argv)
 				continue;
 			}
 			else {
-				logging (haddrp, client_port, n, buf, &mutex);	// logging
+				logging (haddrp, client_port, n, buf);	// logging
 				Rio_writen_w (*connfdp, buf, strlen (buf));	// serve recieved contents
 				Close (clientfd);
 			}
@@ -161,26 +151,21 @@ int main(int argc, char **argv)
  * strtok function in string.h is used. If there is any problem, return -1.
  * strtok is locked by semaphore, so this function is thread-safe.
  */
-int parse_client (char *buf, char **host, char **port, char **msg, sem_t *mutexp) {
+int parse_client (char *buf, char **host, char **port, char **msg) {
         char *input = buf;
         char *split = " \n\t";  // break input by space, tab or \n character.
 
         /* parse input into 3 strings */
-	P (mutexp);
         if ((*host = strtok (input, split)) == NULL) {
-		V (mutexp);
 		return -1;
 	}
     	else if ((*port = strtok (NULL, split)) == NULL) {
-		V (mutexp); 
 		return -1;
 	}
 	else if ((*msg = strtok (NULL, "")) == NULL) {
-		V (mutexp); 
 		return -1;
 	}
 	
-	V (mutexp);
 	return 0;
 }
 
@@ -189,13 +174,11 @@ int parse_client (char *buf, char **host, char **port, char **msg, sem_t *mutexp
  * Use struct tm to identify the time, and semafore to make this function thread-safe.
  * Return -1 if it have open file problem. Else, return 0;
  */
-void logging (char *IP, int port, size_t size, char *msg, sem_t *mutexp) {
+void logging (char *IP, int port, size_t size, char *msg) {
 	time_t timer;
 	char sport[MAXLINE];
 	char ssize[MAXLINE];
 
-	P (mutexp);
-	
 	/* file descriptor for logging with rio_write */
 	int fd = Open ("./proxy.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
 
@@ -216,7 +199,6 @@ void logging (char *IP, int port, size_t size, char *msg, sem_t *mutexp) {
 	Rio_writen_w (fd, " ", 1);
 	Rio_writen_w (fd, msg, strlen (msg));
 	
-	V (mutexp);
 } 
 
 
@@ -228,7 +210,6 @@ void logging (char *IP, int port, size_t size, char *msg, sem_t *mutexp) {
 int open_clientfd_ts(char *hostname, int port, sem_t *mutexp) {
 	int clientfd;
     	struct hostent *hp;
-//TODO:	struct *pirv_hp = (struct hostent *)malloc (sizeof (struct hostent));
 	struct sockaddr_in serveraddr;
 
 	if ((clientfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
