@@ -244,8 +244,22 @@ void logging (char *IP, int port, size_t size, char *msg, sem_t *mutexp) {
 
 	/* get tm structure from time function */
 	time (&timer);
-	char *date = strtok (ctime (&timer), "\n");	// get Date information without \n
+	char *dinfo = ctime (&timer);	
+	char *day = strtok (dinfo, " ");
+	char *month = strtok (NULL, " ");
+	char *date = strtok (NULL, " ");
+	char *time = strtok (NULL, " ");
+	char *year = strtok (NULL, "\n");
+
+	Rio_writen_w (fd, day, strlen (day));
+	Rio_writen_w (fd, " ", 1);
 	Rio_writen_w (fd, date, strlen (date));
+        Rio_writen_w (fd, " ", 1);
+	Rio_writen_w (fd, month, strlen (month));
+        Rio_writen_w (fd, " ", 1);
+	Rio_writen_w (fd, year, strlen (year));
+        Rio_writen_w (fd, " ", 1);
+	Rio_writen_w (fd, time, strlen (time));
 	Rio_writen_w (fd, " KST: ", 6);
 	Rio_writen_w (fd, IP, strlen (IP));
 	Rio_writen_w (fd, " ", 1);
