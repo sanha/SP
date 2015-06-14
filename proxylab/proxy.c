@@ -103,7 +103,7 @@ int main(int argc, char **argv)
         	client_port = ntohs (clientaddr.sin_port);
 		V (&mutex);
 
-	        printf ("Proxy server connected to %s (%s), port %d\n", hp->h_name, haddrp, client_port);
+//	        printf ("Proxy server connected to %s (%s), port %d\n", hp->h_name, haddrp, client_port);
 
 		struct thread_info *tinfo = Malloc (sizeof (struct thread_info));
 		tnum ++;
