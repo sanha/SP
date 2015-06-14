@@ -151,7 +151,6 @@ void *proxy_thread (void *vargp) {
 		/* parsing client's input */
                 if (parse_client (buf, &host, &port, &msg, &mutex) < 0) {
 	                char *err = "proxy usage: <host> <port> <message>\n";
-                        printf ("%s", err);
                         Rio_writen_w (connfd, err, strlen (err));
                         continue;
                 }
@@ -172,7 +171,6 @@ void *proxy_thread (void *vargp) {
                 /* open clientfd as a proxy client */
                 if ((clientfd = open_clientfd_ts (host, port_num, &mutex)) < 0) {
                         char *err = "proxy couldn't open clientfd\n";
-                        printf ("%s", err);
                         Rio_writen_w (connfd, err, strlen (err));
                         continue;
                 }
@@ -182,7 +180,6 @@ void *proxy_thread (void *vargp) {
                 Rio_writen_w (clientfd, msg, strlen (msg));     // sending message
                 if ((n = Rio_readlineb_w (&rio_server, buf, MAXLINE)) == 0) {
                         char *err = "proxy couldn't receive msg from server\n";
-                        printf ("%s", err);
                         Rio_writen_w (connfd, err, strlen (err));
 			Close (clientfd);
                         continue;
